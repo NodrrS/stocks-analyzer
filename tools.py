@@ -1,69 +1,127 @@
 # tools.py
 import os
-import streamlit as st
+import json
 from typing import List, Dict, Optional
 
-from dotenv import load_dotenv
-load_dotenv()
+# Optional Streamlit secrets
+def _get_secret(name: str) -> Optional[str]:
+    try:
+        import streamlit as st
+        return st.secrets.get(name)
+    except Exception:
+        return None
 
-# ---- OpenAI (Responses API) ----
-try:
-    from openai import OpenAI
-except Exception:
-    OpenAI = None  # handled below
+from openai import OpenAI
+from utils import search_web
 
-def _openai_client():
-    if OpenAI is None:
-        raise RuntimeError("Install openai: pip install openai")
-    # Works with env or (optionally) Streamlit secrets
-    api_key = st.secrets.get("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("OpenAI key not found. Set OPENAI_API_KEY in .env or Streamlit secrets.")
-    return OpenAI(api_key=api_key)
+OPENAI_API_KEY = (
+    os.getenv("OPENAI_API_KEY")
+    or _get_secret("OPENAI_API_KEY")
+)
 
+if not OPENAI_API_KEY:
+    raise RuntimeError("OpenAI key missing. Set OPENAI_API_KEY in .env or .streamlit/secrets.toml")
+
+client = OpenAI(api_key=OPENAI_API_KEY)
+
+# -------- Tool schema (lesson-style) --------
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "Search the web for fresh information",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+        },
+    }
+]
+
+def invoke_model(messages: List[Dict], tools: List[Dict] | None = None, model: str = "gpt-4o-mini") -> Dict:
+    """
+    Thin wrapper around Chat Completions (kept simple per lesson).
+    Returns {"message": Message, "tool_calls": list}
+    """
+    completion = client.chat.completions.create(
+        model=model,
+        tools=tools,
+        messages=messages,
+    )
+    msg = completion.choices[0].message
+    return {"message": msg, "tool_calls": msg.tool_calls or []}
+
+# -------- Summarizer (news -> concise text) --------
 DEFAULT_MODEL = "gpt-4o-mini"
-
-# Prompt template with placeholders
 DEFAULT_NEWS_PROMPT = (
-    "Summarize the news item below for a retail investor. "
-    "Max {max_chars} characters. Focus on what moved/ could move the stock, "
-    "mention catalysts, guidance, products, legal or macro angles. "
-    "Be concise and neutral. If the item is irrelevant to the ticker, say 'Skip'.\n\n"
+    "Summarize for a retail investor in <= {max_chars} characters. "
+    "Focus on catalysts, guidance, product/legal/macro impacts. "
+    "Be concise and neutral.\n\n"
     "TITLE: {title}\nURL: {url}\nCONTENT:\n{content}"
 )
 
 def summarize_news_items(
-    items: List[dict],
-    max_chars: int = 300,
-    model: Optional[str] = None,
+    items: List[Dict],
+    max_chars: int = 320,
     prompt_template: str = DEFAULT_NEWS_PROMPT,
+    model: str = DEFAULT_MODEL,
 ) -> List[Dict]:
     """
-    Returns a list of dicts: [{"title", "url", "summary"}] in same order.
+    One chat call per item (simple & reliable).
+    Output: [{"title","url","summary"} ...]
     """
-    client = _openai_client()
-    model = model or DEFAULT_MODEL
-    out: List[Dict] = []
+    out = []
     for it in items:
         title = it.get("title") or "Untitled"
         url = it.get("url") or ""
         content = it.get("content") or it.get("snippet") or ""
-        # Build concrete prompt
-        prompt = prompt_template.format(title=title, url=url, content=content, max_chars=max_chars)
+        prompt = prompt_template.format(max_chars=max_chars, title=title, url=url, content=content)
 
-        # Responses API (preferred per OpenAI docs)
-        try:
-            resp = client.responses.create(
-                model=model,
-                input=prompt,
-            )
-            summary = getattr(resp, "output_text", None) or ""
-        except Exception as e:
-            summary = f"(summarization error: {e})"
-
-        # Hard trim to max_chars (safety)
-        if max_chars and isinstance(max_chars, int):
-            summary = (summary[:max_chars]).rstrip()
-
+        messages = [
+            {"role": "system", "content": "You are a helpful financial news summarizer."},
+            {"role": "user", "content": prompt},
+        ]
+        res = client.chat.completions.create(model=model, messages=messages)
+        summary = (res.choices[0].message.content or "").strip()
+        if isinstance(max_chars, int) and max_chars > 0:
+            summary = summary[:max_chars]
         out.append({"title": title, "url": url, "summary": summary})
     return out
+
+# -------- Optional: example tool-calling pipeline (from your lesson) --------
+def run_with_tool_calling(user_task: str, model: str = "gpt-4o-mini") -> str:
+    """
+    Demo of tool-calling per the lesson:
+    - Ask model
+    - If it requests web_search, call search_web()
+    - Feed results back and get final answer
+    """
+    from datetime import datetime
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a helpful assistant that can search the web. "
+                f"Current date: {datetime.now():%Y-%m-%d}"
+            ),
+        },
+        {"role": "user", "content": user_task},
+    ]
+
+    first = invoke_model(messages, tools=TOOLS, model=model)
+    msg, calls = first["message"], first["tool_calls"]
+
+    if calls:
+        for call in calls:
+            args = json.loads(call.function.arguments or "{}")
+            if call.function.name == "web_search" and "query" in args:
+                results = search_web(args["query"])
+                messages.append(
+                    {"role": "assistant", "content": f"Results for '{args['query']}':\n{results}"}
+                )
+        final = invoke_model(messages, tools=None, model=model)
+        return final["message"].content or ""
+    else:
+        return msg.content or ""
