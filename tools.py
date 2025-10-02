@@ -1,5 +1,6 @@
 # tools.py
 import os
+import streamlit as st
 from typing import List, Dict, Optional
 
 from dotenv import load_dotenv
@@ -15,18 +16,12 @@ def _openai_client():
     if OpenAI is None:
         raise RuntimeError("Install openai: pip install openai")
     # Works with env or (optionally) Streamlit secrets
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        try:
-            import streamlit as st
-            api_key = st.secrets.get("OPENAI_API_KEY")
-        except Exception:
-            api_key = None
+    api_key = st.secrets.get("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("OpenAI key not found. Set OPENAI_API_KEY in .env or Streamlit secrets.")
     return OpenAI(api_key=api_key)
 
-DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+DEFAULT_MODEL = "gpt-4o-mini"
 
 # Prompt template with placeholders
 DEFAULT_NEWS_PROMPT = (
