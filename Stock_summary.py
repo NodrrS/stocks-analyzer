@@ -16,7 +16,7 @@ Notes:
 - BUY rule (default): mom_3m & mom_6m ≥ 3% and vol_60d ≤ 35%
 - SELL rule (default): mom_3m & mom_6m ≤ −3%
 """
-import math
+import math 
 import time
 import pandas as pd
 import numpy as np
@@ -31,7 +31,7 @@ st.set_page_config(page_title="Stocks Analyzer — Retail Top 5", layout="wide")
 # ----------------------------
 # Config & helpers
 # ----------------------------
-DEFAULT_WATCHLIST = "AAPL, MSFT, NVDA, GOOGL, AMZN, META, TSLA, JPM, V, MA, UNH, JNJ, PG, XOM, CVX, LVMUY, SAP, ASML, ORCL, COST"
+Tickers = "AAPL, MSFT, NVDA, GOOGL, AMZN, META, TSLA, JPM, V, MA, UNH, JNJ, PG, XOM, CVX, LVMUY, SAP, ASML, ORCL, COST"
 # NEW: curated universes you can expand anytime
 PRESETS = {
     # 0. None - for manual selection only

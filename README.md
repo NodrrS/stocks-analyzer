@@ -29,5 +29,5 @@ pip install -r requirements.txt
 
 # conda activate tr
 # pip3 install -r requirements.txt
-# pip3 install streamlit
-# streamlit run app.py
+# 
+# streamlit run Stock_summary.py 
