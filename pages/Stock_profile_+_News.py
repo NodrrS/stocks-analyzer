@@ -2,8 +2,15 @@
 import streamlit as st
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit as st
+try:
+    from utils import yf_history_1y, add_indicators, yf_company_info, human_market_cap, news_for_ticker
+except Exception as e:
+    st.error("Import failed. See details below.")
+    st.exception(e)
+    st.stop()
 key = st.secrets["OPENAI_API_KEY"]
-
+key = st.secrets["TAVILY_API"]
 from utils import yf_history_1y, add_indicators, yf_company_info, human_market_cap, news_for_ticker
 from tools import summarize_news_items, DEFAULT_MODEL
 
