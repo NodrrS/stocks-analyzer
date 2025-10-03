@@ -2,30 +2,28 @@
 import os
 import json
 from typing import List, Dict, Optional
+from datetime import datetime
 
-# Optional Streamlit secrets
-def _get_secret(name: str) -> Optional[str]:
-    try:
-        import streamlit as st
-        return st.secrets.get(name)
-    except Exception:
-        return None
-
+import streamlit as st
 from openai import OpenAI
+
 from utils import search_web
 
-OPENAI_API_KEY = (
+
+# ---------------- Keys / client ----------------
+OPENAI_API_KEY: Optional[str] = (
     os.getenv("OPENAI_API_KEY")
-    or _get_secret("OPENAI_API_KEY")
+    or st.secrets.get("OPENAI_API_KEY")
 )
 
 if not OPENAI_API_KEY:
-    raise RuntimeError("OpenAI key missing. Set OPENAI_API_KEY in .env or .streamlit/secrets.toml")
+    raise RuntimeError("OpenAI key missing. Set OPENAI_API_KEY in .env or in Streamlit Cloud Secrets.")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# -------- Tool schema (lesson-style) --------
-TOOLS = [
+
+# ---------------- Tool schema (lesson-style) ----------------
+TOOLS: List[Dict] = [
     {
         "type": "function",
         "function": {
@@ -40,7 +38,8 @@ TOOLS = [
     }
 ]
 
-def invoke_model(messages: List[Dict], tools: List[Dict] | None = None, model: str = "gpt-4o-mini") -> Dict:
+
+def invoke_model(messages: List[Dict], tools: Optional[List[Dict]] = None, model: str = "gpt-4o-mini") -> Dict:
     """
     Thin wrapper around Chat Completions (kept simple per lesson).
     Returns {"message": Message, "tool_calls": list}
@@ -53,7 +52,8 @@ def invoke_model(messages: List[Dict], tools: List[Dict] | None = None, model: s
     msg = completion.choices[0].message
     return {"message": msg, "tool_calls": msg.tool_calls or []}
 
-# -------- Summarizer (news -> concise text) --------
+
+# ---------------- Summarizer (news -> concise text) ----------------
 DEFAULT_MODEL = "gpt-4o-mini"
 DEFAULT_NEWS_PROMPT = (
     "Summarize for a retail investor in <= {max_chars} characters. "
@@ -72,7 +72,7 @@ def summarize_news_items(
     One chat call per item (simple & reliable).
     Output: [{"title","url","summary"} ...]
     """
-    out = []
+    out: List[Dict] = []
     for it in items:
         title = it.get("title") or "Untitled"
         url = it.get("url") or ""
@@ -90,7 +90,8 @@ def summarize_news_items(
         out.append({"title": title, "url": url, "summary": summary})
     return out
 
-# -------- Optional: example tool-calling pipeline (from your lesson) --------
+
+# ---------------- Optional: example tool-calling pipeline (from your lesson) ----------------
 def run_with_tool_calling(user_task: str, model: str = "gpt-4o-mini") -> str:
     """
     Demo of tool-calling per the lesson:
@@ -98,8 +99,7 @@ def run_with_tool_calling(user_task: str, model: str = "gpt-4o-mini") -> str:
     - If it requests web_search, call search_web()
     - Feed results back and get final answer
     """
-    from datetime import datetime
-    messages = [
+    messages: List[Dict] = [
         {
             "role": "system",
             "content": (
