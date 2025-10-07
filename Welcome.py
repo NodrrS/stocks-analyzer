@@ -9,8 +9,8 @@ col1, col2 = st.columns(2, gap="large")
 
 with col1:
     if st.button("📊 General Analysis (Top 5 Candidates)", use_container_width=True):
-        st.switch_page("pages/Stocklyze general insights.py")   # update filename if different
+        st.switch_page("pages/General_Analysis.py")   # update filename if different
 
 with col2:
     if st.button("📈 Stock profile powered by News", use_container_width=True):
-        st.switch_page("pages/Stock_profile_powered by_News.py")
+        st.switch_page("pages/Stock_profile_powered_by_News.py")
