@@ -1,6 +1,6 @@
 import streamlit as st
 
-st.set_page_config(page_title="Welcome to Stocklyze", page_icon="🤖", layout="centered")
+st.set_page_config(page_title="Welcome to Stockily", page_icon="🤖", layout="centered")
 
 # Chat-style intro
 st.chat_message("assistant").markdown("👋 Welcome to **Stocklyze**! What are you looking for today?")
