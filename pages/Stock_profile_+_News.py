@@ -1,8 +1,10 @@
 # pages/Stock_profile_+_News.py
 import streamlit as st
 import plotly.graph_objects as go
+from streamlit_searchbox import st_searchbox
 
 from utils import (
+    resolve_symbol,
     yf_history_1y,
     add_indicators,
     yf_company_info,
@@ -13,26 +15,163 @@ from tools import summarize_news_items, DEFAULT_MODEL
 
 st.set_page_config(page_title="Stock Profile", page_icon="📈", layout="wide")
 st.title("📊 Stock Profile")
+# --- Mobile sidebar hint (blink the toggle + floating pill) ---
+def sidebar_hint(show: bool):
+    if not show:
+        return
+    st.markdown("""
+    <style>
+      /* Try multiple selectors to catch the header toggle across versions */
+      button[kind="header"],
+      button[title*="sidebar"],
+      [data-testid="stSidebarCollapseButton"] button,
+      [data-testid="stSidebarCollapseButton"] {
+        animation: sbPulse 1.2s ease-in-out infinite !important;
+        outline: 2px solid #ffbd2e !important;
+        border-radius: 12px !important;
+      }
+      @keyframes sbPulse {
+        0%   { box-shadow: 0 0 0 rgba(255,189,46,0.0); }
+        50%  { box-shadow: 0 0 16px rgba(255,189,46,0.8); }
+        100% { box-shadow: 0 0 0 rgba(255,189,46,0.0); }
+      }
+      /* Floating hint, only on small screens */
+      .sb-hint {
+        position: fixed; top: 14px; left: 14px;
+        z-index: 9999;
+        background: #ffffff;
+        border: 2px solid #ffbd2e;
+        border-radius: 999px;
+        padding: 6px 10px;
+        font-weight: 600;
+        box-shadow: 0 6px 18px rgba(0,0,0,0.15);
+        animation: sbPulse 1.2s ease-in-out infinite;
+      }
+      @media (min-width: 800px) { .sb-hint { display: none; } }  /* desktop: hide pill */
+    </style>
+    <div class="sb-hint">👈 Tap to open sidebar</div>
+    """, unsafe_allow_html=True)
 
-# -------- Sidebar: one input + Apply --------
+# One-time, show the hint until a ticker is chosen or user dismisses it
+if "hide_sidebar_hint" not in st.session_state:
+    st.session_state.hide_sidebar_hint = False
+
+# Show when there is no selected ticker yet (first-time mobile landing)
+_should_hint = (not st.session_state.get("selected_ticker")) and (not st.session_state.hide_sidebar_hint)
+sidebar_hint(_should_hint)
+
+# Optional: small dismiss control (appears only while hint is visible)
+if _should_hint:
+    st.button("Got it", key="dismiss_sb_hint", on_click=lambda: st.session_state.update(hide_sidebar_hint=True))
+
+# --- Guide: blink CSS + toast if user arrived from Welcome ---
+GUIDE_FLAG = st.session_state.get("guide")
+
+def guide_active_for_this_page(flag, expected_filename: str) -> bool:
+    return bool(flag and flag.get("target_page") == expected_filename)
+
+# CSS for blinking highlight (border + subtle glow)
+def guide_css():
+    st.markdown("""
+    <style>
+      .guide-blink {
+        animation: guideBlink 1.2s ease-in-out infinite;
+        border: 2px solid #ffbd2e !important;
+        border-radius: 10px;
+        box-shadow: 0 0 0 rgba(255,189,46,0);
+        padding: 8px 12px;
+      }
+      @keyframes guideBlink {
+        0%   { box-shadow: 0 0 0 rgba(255,189,46,0.0); }
+        50%  { box-shadow: 0 0 16px rgba(255,189,46,0.75); }
+        100% { box-shadow: 0 0 0 rgba(255,189,46,0.0); }
+      }
+      .guide-caption { color: #c27c08; font-weight: 600; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# If guide is for this page, show toast + enable CSS once
+if guide_active_for_this_page(GUIDE_FLAG, "Stock_profile_+_News.py"):
+    guide_css()
+    st.toast(GUIDE_FLAG.get("hint", "Start by entering a ticker or company name."))
+
+# -------- Sidebar: type-ahead search + Apply (with auto-select if single match) --------
+st.sidebar.header("🔎 Find a stock")
+
+# keep last confirmed ticker
 if "selected_ticker" not in st.session_state:
     st.session_state.selected_ticker = None
 
-with st.sidebar.form("find_stock_form"):
-    q = st.text_input(
-        "Ticker or company name",
-        value="",
-        placeholder="e.g., AMAT or Applied Materials",
-        key="sp_query",
-    )
-    applied = st.form_submit_button("Apply", use_container_width=True)
+def _symbol_search_cb(query: str):
+    """
+    searchbox callback — returns a list of dicts with 'id' (returned on select)
+    and 'name' (shown in dropdown). We also stash last query/suggestions in
+    session_state so we can auto-select when there's a single match.
+    """
+    q = (query or "").strip()
+    if not q:
+        st.session_state["_typeahead_last_query"] = ""
+        st.session_state["_typeahead_last_suggestions"] = []
+        return []
+    results = resolve_symbol(q, limit=8) or []
+    st.session_state["_typeahead_last_query"] = q
+    st.session_state["_typeahead_last_suggestions"] = results
+    return [
+        {
+            "id": r["symbol"],
+            "name": f"{r['symbol']} — {r.get('shortname') or r.get('longname') or ''}"
+                    + (f" ({r.get('exchDisp')})" if r.get('exchDisp') else "")
+        }
+        for r in results
+    ]
 
-if applied and q.strip():
-    st.session_state.selected_ticker = q.strip().upper()
+with st.sidebar:
+    # Blink highlight if welcome guide is targeting this control
+    highlight = guide_active_for_this_page(GUIDE_FLAG, "Stock_profile_+_News.py") and \
+                (GUIDE_FLAG.get("target") == "ticker_input")
+    if highlight:
+        st.markdown('<div class="guide-blink">', unsafe_allow_html=True)
+
+    selected_item = st_searchbox(
+        _symbol_search_cb,
+        key="ticker_typeahead",
+        placeholder="Type a ticker or company name…",
+        clear_on_submit=False,
+    )
+
+    if highlight:
+        st.caption("💡 **Give here the name or ticker of the stock.**")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # Extract a pure ticker string from selected_item (dict or str)
+    selected_symbol = None
+    if isinstance(selected_item, dict):
+        selected_symbol = (selected_item.get("id") or selected_item.get("symbol") or "").upper()
+    elif isinstance(selected_item, str):
+        selected_symbol = selected_item.strip().upper()
+
+    # Auto-select if there's exactly one suggestion
+    _last_q = st.session_state.get("_typeahead_last_query", "")
+    _last_sugs = st.session_state.get("_typeahead_last_suggestions", [])
+    if not selected_symbol and _last_q and isinstance(_last_sugs, list) and len(_last_sugs) == 1:
+        selected_symbol = (_last_sugs[0].get("symbol") or "").upper()
+        if selected_symbol:
+            st.toast(f"Auto-selected: {selected_symbol}")
+
+    # Apply button so heavy charts/news load only when confirmed
+    applied = st.button("Apply", use_container_width=True)
+
+# Clear the guide after first render of this page (one-shot hint)
+if guide_active_for_this_page(GUIDE_FLAG, "Stock_profile_+_News.py"):
+    del st.session_state["guide"]
+
+# Persist user choice on Apply
+if applied and selected_symbol:
+    st.session_state.selected_ticker = selected_symbol
 
 ticker = st.session_state.selected_ticker
 if not ticker:
-    st.info("Enter a ticker or company name and click **Apply**.")
+    st.info("Start typing to search and pick a stock, then click **Apply**.")
     st.stop()
 
 # -------- Charts (1Y, fixed) --------

@@ -1,4 +1,5 @@
 streamlit
+streamlit-searchbox
 pandas
 numpy
 plotly

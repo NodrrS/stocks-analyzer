@@ -110,3 +110,63 @@ def yf_company_info(ticker: str) -> Dict:
         }
     except Exception:
         return {"name": ticker}
+
+# ---------- Symbol resolver (Yahoo Finance search) ----------
+import re
+import requests
+from functools import lru_cache
+from typing import List, Dict
+
+_TICKER_RE = re.compile(r"^[A-Z.\-]{1,10}$")
+
+def is_probable_ticker(s: str) -> bool:
+    return bool(_TICKER_RE.match((s or "").upper()))
+
+@lru_cache(maxsize=512)
+def _yahoo_symbol_search_cached(query: str, limit: int) -> List[Dict]:
+    """Cached HTTP call so repeated typing doesn't spam the endpoint."""
+    url = "https://query2.finance.yahoo.com/v1/finance/search"
+    params = {"q": query, "quotesCount": limit, "newsCount": 0, "listsCount": 0}
+    headers = {"User-Agent": "Mozilla/5.0"}
+    r = requests.get(url, params=params, headers=headers, timeout=8)
+    r.raise_for_status()
+    data = r.json() or {}
+    out: List[Dict] = []
+    for q in data.get("quotes", [])[:limit]:
+        qt = (q.get("quoteType") or "").upper()
+        if qt not in {"EQUITY", "ETF"}:
+            continue
+        out.append({
+            "symbol": (q.get("symbol") or "").upper(),
+            "shortname": q.get("shortname") or "",
+            "longname": q.get("longname") or "",
+            "exchDisp": q.get("exchDisp") or "",
+            "typeDisp": q.get("typeDisp") or qt.title(),
+        })
+    return out
+
+def yahoo_symbol_search(query: str, limit: int = 8) -> List[Dict]:
+    """Public wrapper around the cached call with basic guards."""
+    q = (query or "").strip()
+    if not q:
+        return []
+    try:
+        return _yahoo_symbol_search_cached(q, limit)
+    except Exception:
+        return []
+
+def resolve_symbol(query: str, limit: int = 8) -> List[Dict]:
+    """
+    Returns a list of candidates: [{"symbol","shortname","longname","exchDisp","typeDisp"}, ...]
+    If the user typed something that looks like a ticker, ensure that exact ticker appears first.
+    """
+    q = (query or "").strip()
+    if not q:
+        return []
+    results = yahoo_symbol_search(q, limit=limit)
+    if is_probable_ticker(q):
+        if not any(r["symbol"] == q.upper() for r in results):
+            results = [{"symbol": q.upper(), "shortname": "", "longname": "", "exchDisp": "", "typeDisp": "Ticker"}] + results
+        else:
+            results = sorted(results, key=lambda r: 0 if r["symbol"] == q.upper() else 1)
+    return results
